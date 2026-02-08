@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDS 多模态智能诊断系统</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/nifti-reader-js@0.5.4/release/current/nifti-reader.js"></script>
+
+    <style>
+        /* ---------------- 1. 基础样式与变量 ---------------- */
+        :root {
+            --primary: #0ea5e9;       
+            --primary-dark: #0369a1;  
+            --accent: #8b5cf6;        
+            --danger: #f43f5e;        
+            --success: #10b981;       
+            --bg-gradient: radial-gradient(circle at 10% 20%, rgb(239, 246, 255) 0%, rgb(219, 234, 254) 90%);
+            --glass-bg: rgba(255, 255, 255, 0.9);
+            --glass-border: rgba(255, 255, 255, 0.95);
+            --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.04);
+            --text-main: #0f172a;
+            --text-sub: #475569; 
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { font-size: 18px; } 
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            line-height: 1.6;
+            font-size: 1rem; 
+        }
+
+        /* 隐藏类，用于页面切换 */
+        .hidden { display: none !important; }
+
+        /* ---------------- 2. 导航栏 ---------------- */
+        nav {
+            padding: 1.2rem 5%;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--glass-border);
+            position: sticky; top: 0; z-index: 100;
+        }
+        .logo-box { display: flex; align-items: center; gap: 10px; }
+        .logo-icon { font-size: 1.8rem; } 
+        .logo-text { font-weight: 800; font-size: 1.6rem; color: var(--primary-dark); letter-spacing: -0.5px; } 
+        .version-badge {
+            padding: 8px 20px; 
+            background: rgba(255,255,255,0.8); border-radius: 30px;
+            font-size: 0.95rem; font-weight: 600; color: var(--primary-dark);
+            border: 1px solid rgba(255,255,255,0.5);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+        }
+
+        /* ---------------- 3. 主页布局 ---------------- */
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; } 
+        .header-section { text-align: center; padding: 4rem 1rem 3rem; }
+        .main-title {
+            font-size: 3.8rem; font-weight: 800; color: var(--text-main);
+            background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+        .sub-title { font-size: 1.25rem; color: var(--text-sub); font-weight: 500; max-width: 800px; margin: 0 auto; }
+
+        /* ---------------- 4. 玻璃卡片通用 ---------------- */
+        .glass-card {
+            background: var(--glass-bg); backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border); border-radius: 24px;
+            box-shadow: var(--shadow-soft);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        /* ---------------- 5. 表单区域 ---------------- */
+        .patient-bar { display: flex; gap: 2.5rem; padding: 2rem 3rem; align-items: flex-end; margin-bottom: 2.5rem; flex-wrap: wrap; }
+        .input-wrapper { flex: 1; min-width: 240px; }
+        .label-style { display: block; font-size: 0.95rem; font-weight: 700; color: var(--text-sub); margin-bottom: 0.8rem; }
+        .input-field {
+            width: 100%; padding: 0.9rem 1.2rem;
+            border: 2px solid #cbd5e1; border-radius: 12px;
+            background: rgba(255, 255, 255, 0.6);
+            font-size: 1.15rem; color: var(--text-main); transition: 0.2s;
+        }
+        .input-field:focus { border-color: var(--primary); background-color: #fff; outline: none; box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.15); }
+
+        /* ---------------- 6. 上传区域 ---------------- */
+        .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; margin-bottom: 4rem; }
+        @media (max-width: 768px) { .upload-grid { grid-template-columns: 1fr; } }
+
+        .upload-card { padding: 2rem; display: flex; flex-direction: column; height: 100%; border-top: 5px solid transparent; position: relative; }
+        .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 1rem; }
+        .card-title { font-weight: 700; color: var(--text-main); font-size: 1.3rem; }
+        .tag { font-size: 0.85rem; padding: 6px 12px; border-radius: 8px; font-weight: 700; }
+        .tag-blue { background: #e0f2fe; color: #0284c7; }
+        .tag-purple { background: #f3e8ff; color: #7e22ce; }
+
+        .drop-zone {
+            flex-grow: 1; min-height: 200px; 
+            background: rgba(255,255,255,0.5);
+            border: 3px dashed #cbd5e1; border-radius: 16px;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            text-align: center; cursor: pointer; transition: 0.2s; padding: 1.5rem;
+        }
+        .drop-zone:hover { border-color: var(--primary); background: #fff; }
+        .drop-zone.active { background: #f0fdf4; border-color: var(--success); border-style: solid; }
+
+        .file-info { margin-top: 15px; font-size: 0.9rem; color: var(--success); font-weight: bold; display: none;}
+        
+        /* 预览按钮 (上传后显示) */
+        .btn-preview-trigger {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: var(--text-main);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            display: none; /* 默认隐藏 */
+            transition: all 0.2s;
+        }
+        .btn-preview-trigger:hover { transform: scale(1.05); background: #000; }
+
+        /* ---------------- 7. 新增：预览详情页 (Full Page View) ---------------- */
+        #view-preview {
+            padding: 2rem 0;
+            animation: fadeIn 0.4s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        .preview-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 2rem;
+        }
+        .btn-back {
+            background: rgba(255,255,255,0.5); border: 1px solid #cbd5e1;
+            padding: 0.6rem 1.5rem; border-radius: 10px; cursor: pointer;
+            font-weight: 600; display: flex; align-items: center; gap: 8px;
+            transition: 0.2s;
+        }
+        .btn-back:hover { background: #fff; border-color: var(--primary); color: var(--primary); }
+
+        .preview-content {
+            display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;
+        }
+        .viewer-box {
+            background: #000;
+            border-radius: 16px;
+            padding: 10px;
+            width: 512px; 
+            max-width: 100%;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .viewer-canvas-container {
+            position: relative;
+            width: 100%;
+            padding-bottom: 100%; /* Square aspect ratio */
+            background: #111;
+            overflow: hidden;
+            border-radius: 8px;
+        }
+        .viewer-canvas-container canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: contain;
+        }
+        .viewer-controls {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 15px; color: #fff;
+        }
+        .btn-save-img {
+            background: var(--primary); color: white; border: none;
+            padding: 6px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+        }
+        .viewer-title {
+            position: absolute; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.6); color: white;
+            padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; pointer-events: none;
+        }
+        .mask-legend {
+            position: absolute; bottom: 20px; right: 20px;
+            background: rgba(0,0,0,0.6); color: #ff6b6b; border: 1px solid #ff6b6b;
+            padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; pointer-events: none;
+        }
+
+        /* ---------------- 8. 底部操作栏 ---------------- */
+        .btn-area { text-align: center; margin: 4rem 0; }
+        .magic-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, #3b82f6 100%);
+            color: white; border: none; padding: 1.4rem 5rem; 
+            border-radius: 60px; font-size: 1.25rem; font-weight: 700;
+            cursor: pointer; box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.5);
+            transition: all 0.3s; letter-spacing: 1px;
+        }
+        .magic-btn:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 20px 40px -5px rgba(59, 130, 246, 0.6); }
+
+        /* ---------------- 9. 结果与Loading ---------------- */
+        #resultPanel { display: none; margin-top: 2rem; padding: 3.5rem; margin-bottom: 5rem; }
+        /* (原有的结果样式保留) */
+        .result-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.5rem; padding-bottom: 1.5rem; border-bottom: 2px dashed #cbd5e1; }
+        .data-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5rem; margin-bottom: 3rem; }
+        .data-card { background: #fff; border-radius: 20px; padding: 2.5rem 1.5rem; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.03); border: 1px solid #f1f5f9; }
+        .d-icon { font-size: 2.2rem; margin-bottom: 0.8rem; display: block; }
+        .d-val { font-size: 3.5rem; font-weight: 800; color: var(--text-main); line-height: 1.1; margin-bottom: 0.5rem; }
+        .d-label { font-size: 1.05rem; color: var(--text-sub); font-weight: 600; }
+        .ai-box { background: linear-gradient(to right, #fffbeb, #fff); border-left: 6px solid #f59e0b; padding: 2rem; border-radius: 16px; display: flex; gap: 20px; align-items: start; }
+
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.92); backdrop-filter: blur(10px);
+            z-index: 999; display: none; justify-content: center; align-items: center; flex-direction: column;
+        }
+        .spin-icon { font-size: 4.5rem; animation: spin 1s infinite linear; margin-bottom: 1.5rem; color: var(--primary); }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <div class="logo-box">
+            <span class="logo-icon">💠</span>
+            <span class="logo-text">PDS</span>
+        </div>
+        <div class="version-badge">PDS Multimodal v1.0</div>
+    </nav>
+
+    <div id="view-home" class="container">
+        <header class="header-section">
+            <h1 class="main-title">前列腺癌智能诊断</h1>
+            <div class="sub-title">结合临床生物标志物与医疗影像的多模态 AI 辅助诊断平台</div>
+        </header>
+
+        <section class="glass-card patient-bar">
+            <div class="input-wrapper">
+                <label class="label-style">👤 病人姓名 / Name</label>
+                <input type="text" id="pName" class="input-field" placeholder="请输入...">
+            </div>
+            <div class="input-wrapper">
+                <label class="label-style">🎂 年龄 / Age (岁)</label>
+                <input type="number" id="pAge" class="input-field" placeholder="例如: 65">
+            </div>
+            <div class="input-wrapper">
+                <label class="label-style">🩸前列腺特异性抗原 / PSA  (ng/ml)</label>
+                <input type="number" step="0.1" id="pPSA" class="input-field" placeholder="例如: 8.5">
+            </div>
+        </section>
+
+        <div class="upload-grid">
+            
+            <div class="glass-card upload-card" style="border-top-color: var(--primary);">
+                <div class="card-head">
+                    <div class="card-title">影像窗口 MRI</div>
+                    <span class="tag tag-blue">DWI / T2W</span>
+                </div>
+                <div class="drop-zone" onclick="document.getElementById('file1').click()">
+                    <div class="upload-hint">点击上传 MRI 压缩包</div>
+                    <div class="upload-sub">支持 .zip, .7z (含图像与掩膜 .nii)</div>
+                    <div class="file-info" id="info1"></div>
+                </div>
+                <button class="btn-preview-trigger" id="btnPreview1" onclick="switchToPreview('mri')">
+                    👁️ 预览 MRI 影像 & 掩膜
+                </button>
+                <input type="file" id="file1" hidden accept=".zip,.7z,.rar" onchange="handleFileSelect(this, 'mri')">
+            </div>
+
+            <div class="glass-card upload-card" style="border-top-color: var(--accent);">
+                <div class="card-head">
+                    <div class="card-title">影像窗口 PSMA PET/CT</div>
+                    <span class="tag tag-purple">PET / CT</span>
+                </div>
+                <div class="drop-zone" onclick="document.getElementById('file2').click()">
+                    <div class="upload-hint">点击上传 PSMA 压缩包</div>
+                    <div class="upload-sub">支持 .zip, .7z (含图像与掩膜 .nii)</div>
+                    <div class="file-info" id="info2"></div>
+                </div>
+                <button class="btn-preview-trigger" id="btnPreview2" onclick="switchToPreview('psma')">
+                    👁️ 预览 PSMA 影像 & 掩膜
+                </button>
+                <input type="file" id="file2" hidden accept=".zip,.7z,.rar" onchange="handleFileSelect(this, 'psma')">
+            </div>
+
+        </div>
+
+        <div class="btn-area">
+            <button class="magic-btn" onclick="startAI()">开始 AI 多模态融合诊断</button>
+        </div>
+
+        <section id="resultPanel" class="glass-card">
+            <div class="result-header">
+                <div>
+                    <h2 style="font-size: 1.8rem; color: var(--text-main); font-weight: 800;">AI 诊断报告单</h2>
+                    <p style="font-size: 1rem; color: var(--text-sub);">报告编号: #2025-PDS-AUTO-09</p>
+                </div>
+                <div style="text-align: right; font-size: 1.1rem; color: var(--text-sub);">
+                    病人: <span id="resName" style="font-weight: 700; color: var(--text-main);">--</span>
+                </div>
+            </div>
+
+            <div class="data-grid">
+                <div class="data-card">
+                    <span class="d-icon">📈</span>
+                    <div class="d-val" style="color: var(--danger);" id="rRisk">--</div>
+                    <div class="d-label">AI 恶性概率 (Risk)</div>
+                </div>
+                <div class="data-card">
+                    <span class="d-icon">🔢</span>
+                    <div class="d-val" style="color: var(--primary);" id="rGleason">--</div>
+                    <div class="d-label">Gleason 预测分级</div>
+                </div>
+                <div class="data-card">
+                    <span class="d-icon">📊</span>
+                    <div class="d-val" style="color: var(--accent);" id="rPSA">--</div>
+                    <div class="d-label">PSA 输入值</div>
+                </div>
+            </div>
+
+            <div class="ai-box">
+                <div style="font-size: 2.2rem;">💡</div>
+                <div>
+                    <h4 style="margin-bottom: 0.8rem; font-size: 1.25rem;">智能综合决策意见：</h4>
+                    <p style="font-size: 1.1rem; color: #334155; line-height: 1.7;">
+                        模型融合了 MRI/ADC 影像特征与 PSA 生物标志物数据。检测到外周带存在疑似 CS-PCa 病灶区域。
+                    </p>
+                </div>
+            </div>
+        </section>
+        
+        <footer style="text-align: center; padding: 2rem; color: #aaa;">
+            &copy; 2025 PDS AI Lab. 本系统结果仅供科研参考。
+        </footer>
+    </div>
+
+    <div id="view-preview" class="container hidden">
+        <div class="preview-header">
+            <h2 style="font-size: 2rem; color: var(--primary-dark);">影像预览工作台</h2>
+            <button class="btn-back" onclick="backToHome()">
+                <span>⬅️ 返回诊断主页</span>
+            </button>
+        </div>
+
+        <div class="preview-content">
+            <div class="viewer-box">
+                <div class="viewer-title" id="previewTitle">MRI Image View</div>
+                <div class="mask-legend">红色区域: Mask 掩膜</div>
+                
+                <div class="viewer-canvas-container">
+                    <canvas id="canvasBase"></canvas>
+                    <canvas id="canvasMask" style="pointer-events: none; opacity: 0.6;"></canvas>
+                </div>
+
+                <div class="viewer-controls">
+                    <div id="sliceInfo">Slice: Center</div>
+                    <div>
+                        <button class="btn-save-img" onclick="downloadPreview('png')">保存为 PNG</button>
+                        <button class="btn-save-img" onclick="downloadPreview('jpg')" style="background:#555">JPG</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="width: 300px; color: var(--text-sub);">
+                <h3 style="color: var(--text-main); margin-bottom: 10px;">文件详情</h3>
+                <ul id="fileDetails" style="list-style: none; background: rgba(255,255,255,0.6); padding: 15px; border-radius: 12px;">
+                    <li>等待数据加载...</li>
+                </ul>
+                <p style="margin-top: 15px; font-size: 0.9rem;">
+                    * 预览展示的是 3D 影像的中间切片。<br>
+                    * 红色区域表示 AI 或医生标注的感兴趣区域 (ROI/Mask)。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="overlay" id="loader">
+        <div class="spin-icon">⚙️</div>
+        <h3 id="loaderText" style="color: var(--primary-dark); font-weight: 700; font-size: 1.5rem;">正在处理...</h3>
+    </div>
+
+    <script>
+        // 全局数据存储
+        const appData = {
+            mri: { base: null, mask: null, fileName: '' },
+            psma: { base: null, mask: null, fileName: '' },
+            currentType: null // 'mri' or 'psma'
+        };
+
+        // ---------------- 1. 文件处理逻辑 ----------------
+        async function handleFileSelect(input, type) {
+            const file = input.files[0];
+            if (!file) return;
+
+            showLoader(true, "正在解压并解析 .nii 文件...");
+            
+            try {
+                // 1. 解压 Zip
+                const zip = new JSZip();
+                const zipContent = await zip.loadAsync(file);
+                
+                // 2. 寻找 .nii 文件
+                const niiFiles = [];
+                for (let filename in zipContent.files) {
+                    if (filename.endsWith('.nii') || filename.endsWith('.nii.gz')) {
+                        niiFiles.push({
+                            name: filename,
+                            data: await zipContent.files[filename].async("arraybuffer")
+                        });
+                    }
+                }
+
+                if (niiFiles.length < 1) {
+                    alert("错误：压缩包内未找到 .nii 文件！");
+                    showLoader(false);
+                    return;
+                }
+
+                // 3. 简单的启发式规则区分 Mask 和 Base 图像
+                // 假设：文件较小的往往是 Mask (因为只有0/1)，或者文件名包含 mask/label
+                // 这里为了稳健，直接按大小排序，大的当底图，小的当Mask（如果有两个的话）
+                niiFiles.sort((a, b) => b.data.byteLength - a.data.byteLength);
+
+                const baseFile = niiFiles[0];
+                const maskFile = niiFiles.length > 1 ? niiFiles[1] : null;
+
+                // 存储到全局变量
+                appData[type].base = baseFile;
+                appData[type].mask = maskFile;
+                appData[type].fileName = file.name;
+
+                // UI 更新
+                document.getElementById(type === 'mri' ? 'info1' : 'info2').innerText = `✅ ${file.name} (含 ${niiFiles.length} 个NIfTI)`;
+                document.getElementById(type === 'mri' ? 'info1' : 'info2').style.display = 'block';
+                document.getElementById(type === 'mri' ? 'btnPreview1' : 'btnPreview2').style.display = 'inline-block';
+
+            } catch (err) {
+                console.error(err);
+                alert("文件解析失败，请检查压缩包格式。");
+            } finally {
+                showLoader(false);
+            }
+        }
+
+        // ---------------- 2. 视图切换与渲染逻辑 ----------------
+        function switchToPreview(type) {
+            appData.currentType = type;
+            const data = appData[type];
+            
+            if(!data.base) {
+                alert("请先上传文件");
+                return;
+            }
+
+            // 切换 DOM 显示
+            document.getElementById('view-home').classList.add('hidden');
+            document.getElementById('view-preview').classList.remove('hidden');
+
+            // 更新标题
+            document.getElementById('previewTitle').innerText = type === 'mri' ? "MRI 影像预览" : "PSMA PET/CT 预览";
+            
+            // 更新文件详情列表
+            const detailHtml = `
+                <li><strong>文件名:</strong> ${data.fileName}</li>
+                <li><strong>图像源:</strong> ${data.base.name}</li>
+                <li><strong>掩膜源:</strong> ${data.mask ? data.mask.name : '未检测到掩膜'}</li>
+            `;
+            document.getElementById('fileDetails').innerHTML = detailHtml;
+
+            // 渲染 Canvas
+            renderNiftiToCanvas(data.base.data, 'canvasBase', false); // 渲染底图
+            if (data.mask) {
+                renderNiftiToCanvas(data.mask.data, 'canvasMask', true); // 渲染掩膜
+            } else {
+                clearCanvas('canvasMask');
+            }
+        }
+
+        function backToHome() {
+            document.getElementById('view-preview').classList.add('hidden');
+            document.getElementById('view-home').classList.remove('hidden');
+        }
+
+        // ---------------- 3. NIfTI 核心渲染函数 ----------------
+        function renderNiftiToCanvas(arrayBuffer, canvasId, isMask) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+
+            if (nifti.isCompressed(arrayBuffer)) {
+                arrayBuffer = nifti.decompress(arrayBuffer);
+            }
+
+            if (nifti.isNIFTI(arrayBuffer)) {
+                const header = nifti.readHeader(arrayBuffer);
+                const image = nifti.readImage(header, arrayBuffer);
+
+                // 获取维度
+                const cols = header.dims[1];
+                const rows = header.dims[2];
+                const slices = header.dims[3];
+
+                // 设置 Canvas 大小 (统一拉伸到容器大小，或保持比例)
+                canvas.width = cols;
+                canvas.height = rows;
+
+                // 取中间切片
+                const midSlice = Math.floor(slices / 2);
+                document.getElementById('sliceInfo').innerText = `Slice: ${midSlice} / ${slices}`;
+
+                // 读取数据并根据类型转换
+                let typedData;
+                if (header.datatypeCode === nifti.NIFTI1.TYPE_UINT8) {
+                    typedData = new Uint8Array(image);
+                } else if (header.datatypeCode === nifti.NIFTI1.TYPE_INT16) {
+                    typedData = new Int16Array(image);
+                } else if (header.datatypeCode === nifti.NIFTI1.TYPE_FLOAT32) {
+                    typedData = new Float32Array(image);
+                } else {
+                    typedData = new Uint8Array(image); // Fallback
+                }
+
+                // 计算切片在数组中的偏移量
+                const sliceSize = cols * rows;
+                const sliceOffset = sliceSize * midSlice;
+
+                // 创建 ImageData 用于绘制
+                const canvasImageData = ctx.createImageData(cols, rows);
+                const data = canvasImageData.data;
+
+                // 寻找最大值以便归一化显示 (简单对比度拉伸)
+                let maxVal = 0;
+                for (let i = 0; i < sliceSize; i++) {
+                    if (typedData[sliceOffset + i] > maxVal) maxVal = typedData[sliceOffset + i];
+                }
+                if(maxVal === 0) maxVal = 1; // 防止除0
+
+                for (let i = 0; i < sliceSize; i++) {
+                    let val = typedData[sliceOffset + i];
+                    
+                    // 归一化到 0-255
+                    let pixel = (val / maxVal) * 255;
+
+                    const pIndex = i * 4;
+
+                    if (isMask) {
+                        // 如果是掩膜：只显示非0区域，且显示为红色
+                        if (val > 0) {
+                            data[pIndex] = 255;     // R
+                            data[pIndex + 1] = 0;   // G
+                            data[pIndex + 2] = 0;   // B
+                            data[pIndex + 3] = 255; // Alpha (完全不透明，通过CSS opacity控制整体透明度)
+                        } else {
+                            data[pIndex + 3] = 0;   // 透明
+                        }
+                    } else {
+                        // 如果是底图：灰度显示
+                        data[pIndex] = pixel;
+                        data[pIndex + 1] = pixel;
+                        data[pIndex + 2] = pixel;
+                        data[pIndex + 3] = 255;
+                    }
+                }
+
+                ctx.putImageData(canvasImageData, 0, 0);
+            }
+        }
+
+        function clearCanvas(id) {
+            const cvs = document.getElementById(id);
+            const ctx = cvs.getContext('2d');
+            ctx.clearRect(0,0,cvs.width, cvs.height);
+        }
+
+        // ---------------- 4. 导出图片功能 ----------------
+        function downloadPreview(format) {
+            // 创建一个临时 Canvas 将 Base 和 Mask 合并，因为现在是两个分开的Canvas
+            const baseCvs = document.getElementById('canvasBase');
+            const maskCvs = document.getElementById('canvasMask');
+            
+            const tempCvs = document.createElement('canvas');
+            tempCvs.width = baseCvs.width;
+            tempCvs.height = baseCvs.height;
+            const ctx = tempCvs.getContext('2d');
+
+            // 绘制底图
+            ctx.drawImage(baseCvs, 0, 0);
+            // 绘制 Mask (带透明度)
+            ctx.globalAlpha = 0.6; 
+            ctx.drawImage(maskCvs, 0, 0);
+
+            const link = document.createElement('a');
+            link.download = `PDS_Preview_${appData.currentType}.${format}`;
+            link.href = tempCvs.toDataURL(`image/${format}`);
+            link.click();
+        }
+
+        // ---------------- 5. 辅助功能 ----------------
+        function showLoader(show, text="PDS 神经网络正在计算...") {
+            const l = document.getElementById('loader');
+            document.getElementById('loaderText').innerText = text;
+            l.style.display = show ? 'flex' : 'none';
+        }
+
+        // 原有的 startAI 逻辑
+        function startAI() {
+            const name = document.getElementById('pName').value;
+            const psa = document.getElementById('pPSA').value;
+            
+            if(!name || !psa) return alert('请填写完整的临床信息（姓名、PSA）');
+            
+            // 检查是否有文件 (简单检查)
+            if(!appData.mri.base && !appData.psma.base) return alert('请至少上传并解析一份影像文件');
+
+            showLoader(true, "提取特征 ➔ 多模态融合 ➔ 生成报告");
+
+            setTimeout(() => {
+                showLoader(false);
+                document.getElementById('resName').innerText = name;
+                document.getElementById('rPSA').innerText = psa;
+                document.getElementById('rRisk').innerText = "92%";
+                document.getElementById('rGleason').innerText = "4+5";
+                
+                const res = document.getElementById('resultPanel');
+                res.style.display = 'block';
+                res.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
